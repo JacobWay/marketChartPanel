@@ -1,0 +1,229 @@
+<!doctype html>
+<html>
+    <head>
+        <style>
+.panelBody  {
+  background-color:#f6f6f6; border:none; margin:0; padding:8px;
+  overflow:hidden;
+}
+#marketChartPanel .panelBody    { min-height:180px;overflow:hidden; }
+#marketChartPanelBody { min-height:180px;overflow:hidden;
+  background-color:#f6f6f6; border:none; margin:0; padding:8px;
+  overflow:hidden;
+} /*Combined rule above with .panelBody for IE6 */
+
+#marketChartPanel .stockSymbol  { width:50px; font-weight:bold; color:#39718c; }
+#marketChartPanel .stockPrice   { width:50px; text-align:right; }
+#marketChartPanel .stockChange  { width:50px; text-align:right; }
+#marketChartPanel .stockPercent { width:50px; text-align:right; color:#696969; }
+        </style>
+<script type="text/javascript" src="kme.js"></script>
+<script type="text/javascript" src="client/StompJms.js"></script>
+<script type="text/javascript" src="protocol/StompClient.js"></script>
+<script type="text/javascript" src="protocol/XmppClient.js"></script>
+    </head>
+
+    <body onload="whenReady()">
+        <div id="marketChartPanel"></div>
+
+<script type="text/javascript" charset="utf-8">
+function showHover(id, panel)
+{
+    return;
+
+    if (Common.isIE(6) || Common.isIE(7))
+        return;
+
+    if (hoverPanelId != id) {
+        var info = hoverInfo[id];
+        if (info) {
+            if (!hoverPanel) {
+                hoverPanel = new HoverPanel(50, 50);
+            }
+
+            panelElt = panel.getElement();
+            var left = Common.domGetLeft(panelElt);
+            var top = Common.domGetTop(panelElt);
+
+            panelElt.style.outline = "thin solid red";
+            if (hoverOverPanel)
+                hoverOverPanel.getElement().style.outline = "none";
+
+            hoverPanel.show(info.title, info.text, left, top);
+            hoverPanelId = id;
+            hoverOverPanel = panel;
+        }
+    }
+}
+
+function hideHover()
+{
+    if (hoverPanel) {
+        hoverPanel.hide();
+        hoverPanelId = null;
+    }
+}
+
+var marketChartPanel;
+function whenReady(){
+    marketChartPanel = new MarketChartPanel($("marketChartPanel"));
+    marketChartPanel.addStock("KZNG","#F47D31");
+    marketChartPanel.addStock("WSKT","#666666");
+    marketChartPanel.addStock("RTIM","#3B6F8F");
+    marketChartPanel.run();
+    marketChartPanel.panel.handleMouseOver = function (ev) {
+        showHover("marketChartPanel", marketChartPanel.panel);
+    };
+    startServices();
+}
+var stomp;
+var dispatcher;
+function startServices()
+{
+    stomp = new StompClient();
+    dispatcher = new MessageDispatcher(stomp);
+
+    stomp.onopen = function(headers) {
+        var stockService = new StockService();
+        stockService.onQuoteReceived = function(stockQuote) {
+          marketChartPanel.update(stockQuote);
+        };
+        dispatcher.registerService("/topic/stockExchange", stockService);
+    
+        var currencyService = new CurrencyService();
+        currencyPanel.update(currencyService.getQuote("GBP/USD"));
+        currencyPanel.update(currencyService.getQuote("EUR/USD"));
+
+        currencyService.onQuoteReceived = function(currencyQuote) {
+            currencyPanel.update(currencyQuote);
+        };
+        dispatcher.registerService("/topic/currencyExchange", currencyService);
+  
+        var gatewayMonitorService = new BaseService();
+        gatewayMonitorService.onMessageReceived = function(msg) {
+            monitorPanel.update(msg);
+        };
+        dispatcher.registerService("/topic/gatewayMonitor", gatewayMonitorService); 
+  
+        var twitterService = new TwitterService();
+        twitterService.onTweetReceived = function(tweet) {
+            twitterPanel.update(tweet);
+        };
+        dispatcher.registerService("/topic/twitterFeed", twitterService); 
+
+        var newsService = new NewsService();
+        newsService.onArticleReceived = function(article) {
+            newsPanel.update(article);
+        };
+        dispatcher.registerService("/topic/news", newsService); 
+
+        var accessLogService = new BaseService();
+        accessLogService.onMessageReceived = function(msg) {
+            var access;
+            eval("access = "+msg+";");
+            //console.log("msg=["+msg+"]");
+            //console.log("webite=["+access.log.website+"]");
+
+          var cc=access.log.country.toLowerCase();
+          var img='<img class="flag" border="0"'+
+                  ' src="http://api.hostip.info/images/flags/'+cc+'.gif">';
+
+          var logEntry = "";
+          if (access.log.org) {
+             logEntry = access.log.org + " from ";
+          }
+          else {
+             logEntry = 'Anonymous from ';
+          }
+          if (access.log.city) {
+              logEntry = logEntry + access.log.city + ', ';
+          }
+          if (access.log.region == '(null)' ) {
+              access.log.region = 'an iPhone'; // hacked for Jonas
+          }
+          if (access.log.country && access.log.country.toUpperCase() == "US" &&
+              access.log.region) {
+              logEntry = logEntry + access.log.region + ', ';
+          }
+          if (access.log.country) {
+              var countryName = countryNames[access.log.country.toUpperCase()];
+              logEntry = logEntry + countryName + ' is ';
+          }
+
+          var actionLookup = { '/blog' : 'reading Kaazing blogs',
+                               '/support' : 'reading Kaazing support info',
+                               '/industries' : 'reading case studies from Kaazing',
+                               '/products' : 'reading Kaazing product info',
+                               '/contact' : 'reading Kaazing contact info',
+                               '/forums' : 'accessing Kaazing forums',
+                               'demo' : 'executing Kaazing demos',
+                               '/company' : 'reading company information',
+                               '/download' : 'downloading Kaazing products'
+          };
+
+          function getAction(msg) {
+              var action = 'visiting Kaazing.com';
+              for (var key in actionLookup) {
+                  if (msg.indexOf(key) > 0) {
+                      return actionLookup[key];
+                  }
+              }
+              return  action;
+          }
+
+          logEntry = logEntry + ' ' + getAction(msg);
+          show('<div class="log">'+img+' ' + logEntry +'</div>', true);
+        };
+        dispatcher.registerService("/topic/livetail", accessLogService); 
+    }
+
+    stomp.onmessage = function(headers, body) {
+        dispatcher.handleMessage(headers, body);
+    }
+
+    stomp.onreceipt = function(headers) {
+        show("RECEIPT:"+unparse(headers));
+    }
+
+    stomp.onerror = function(headers, body) { 
+        show("ERROR");
+        show(unparse(headers));
+        show(unparse(body));
+    }
+
+    stomp.retries = 0;
+    stomp.onclose = function() {
+        show("CLOSE");
+
+	if (stomp.retries++ < 5)
+	    connect();
+	else
+	    stomp.closed=true;
+    }
+
+    function adjustRetryCount() {
+        if (!stomp.closed)
+            stomp.retries /= 2;
+    }
+    
+    setTimeout(adjustRetryCount, 1000*60*15);
+
+    connect();
+
+    /*
+    $("chat").onclick = function (ev) {
+        parent.rosterPanel.show();
+    };
+    */
+}
+
+function connect()
+{
+    var url=Common.getWSLocation("activemq");
+    stomp.connect(url, {username:"guest", password:"password"}); 
+}
+</script>
+    </body>
+</html>
+
+
